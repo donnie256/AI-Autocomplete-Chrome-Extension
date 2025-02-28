@@ -1,12 +1,13 @@
-// adding a new bookmark row to the popup
-const addNewBookmark = () => {};
-
-const viewBookmarks = () => {};
-
-const onPlay = e => {};
-
-const onDelete = e => {};
-
-const setBookmarkAttributes =  () => {};
-
-document.addEventListener("DOMContentLoaded", () => {});
+document.addEventListener('DOMContentLoaded', () => {
+    const toggle = document.getElementById('toggleAutocomplete');
+    // Retrieve the saved state from chrome.storage
+    chrome.storage.sync.get('autocompleteEnabled', (data) => {
+      toggle.checked = data.autocompleteEnabled || false;
+    });
+  
+    // Listen for toggle changes
+    toggle.addEventListener('change', () => {
+      chrome.storage.sync.set({ autocompleteEnabled: toggle.checked });
+    });
+  });
+  
