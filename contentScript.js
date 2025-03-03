@@ -69,48 +69,39 @@ const createGhostTextOverlay = (input, suggestion) => {
 
   if (!ghost) {
     console.log("🆕 Creating new ghost text overlay.");
-    ghost = document.createElement('div');
+    ghost = document.createElement('span');
     ghost.className = 'ghost-text';
 
-    // Ensure parent is correctly positioned
-    const parentStyle = window.getComputedStyle(input.parentElement);
-    if (parentStyle.position === 'static') {
-      input.parentElement.style.position = 'relative'; // Prevents misalignment
-    }
-
-    // Ghost text should match input field styling
+    // Match the input field styling
     ghost.style.position = 'absolute';
     ghost.style.pointerEvents = 'none';
-    ghost.style.color = 'rgba(150, 150, 150, 0.7)'; // Light gray suggestion text
-    ghost.style.whiteSpace = 'pre-wrap';
-    ghost.style.overflow = 'hidden';
+    ghost.style.color = 'rgba(150, 150, 150, 0.7)'; 
     ghost.style.fontFamily = window.getComputedStyle(input).fontFamily;
     ghost.style.fontSize = window.getComputedStyle(input).fontSize;
     ghost.style.lineHeight = window.getComputedStyle(input).lineHeight;
-    ghost.style.padding = window.getComputedStyle(input).padding;
-    ghost.style.margin = window.getComputedStyle(input).margin;
+    ghost.style.whiteSpace = 'pre-wrap';
     ghost.style.background = 'transparent';
-    ghost.style.zIndex = '1';
+    ghost.style.opacity = '0.8';
 
-    // **Fix alignment issues**
+    // Align ghost text correctly inside input field
     ghost.style.left = `${input.offsetLeft}px`;
     ghost.style.top = `${input.offsetTop}px`;
-    ghost.style.width = `${input.offsetWidth}px`;
-    ghost.style.height = `${input.offsetHeight}px`;
+    ghost.style.width = `${input.clientWidth}px`;
+    ghost.style.height = `${input.clientHeight}px`;
 
     input.parentElement.appendChild(ghost);
   }
 
-  // **Only display suggested text, not what is already typed**
-  const cursorPosition = input.selectionStart || 0;
-  const ghostText = suggestion.slice(cursorPosition); // AI suggestion after cursor
+  // **Only display the suggested part, not user input**
+  const userText = input.value;
+  const ghostText = suggestion.startsWith(userText) ? suggestion.slice(userText.length) : '';
 
-  console.log("🔍 Cursor Position:", cursorPosition);
-  console.log("👻 Ghost Text Suggestion:", ghostText);
+  console.log("👻 Ghost Text Updated:", ghostText);
 
   // **Ensure ghost text only shows the AI-generated suggestion**
-  ghost.textContent = ghostText ? ghostText : "";
+  ghost.textContent = ghostText || "";
 };
+
 
 
 
@@ -123,28 +114,31 @@ const addListeners = (input) => {
     const text = input.value.trim();
     if (text !== '') {
       currentSuggestion = await fetchSuggestion(text);
-      console.log("💡 Current Suggestion:", currentSuggestion);
+      console.log("💡 Updated Suggestion:", currentSuggestion);
 
       if (currentSuggestion) {
         createGhostTextOverlay(input, currentSuggestion);
       }
     }
-  }, 1500);
+  }, 1500); // Adjusted debounce time for responsiveness
 
-  // ✅ Handle Input Changes (Use Debounced Fetch)
+  // ✅ Handle Input Changes (Triggers Suggestions Dynamically)
   input.addEventListener('input', () => {
-    debouncedFetch(); // 🔥 **Now properly using debouncedFetch()**
-    
-    // Remove ghost text if user continues typing
+    debouncedFetch(); // 🔥 Ensure new suggestions are retrieved while typing
+
+    // 🛑 **Fix: Prevent ghost text from disappearing too soon**
     let ghost = input.parentElement.querySelector('.ghost-text');
-    if (ghost) ghost.remove();
+    if (ghost && input.value.length === 0) {
+      console.log("❌ Removing ghost text because input is empty.");
+      ghost.remove();
+    }
   });
 
   // ✅ Handle Keydown Events
   input.addEventListener('keydown', async (e) => {
     console.log("🖮 Key Pressed:", e.key);
 
-    // 🛑 **Fix: Remove ghost text if user presses any normal key (except Tab)**
+    // 🛑 **Fix: Remove ghost text if user presses a normal key**
     if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Enter') {
       let ghost = input.parentElement.querySelector('.ghost-text');
       if (ghost) {
@@ -153,10 +147,10 @@ const addListeners = (input) => {
       }
     }
 
-    // ✅ Handle Tab Key for Autocomplete
+    // ✅ Handle Tab Key to Accept Suggestion
     if (e.key === 'Tab') {
-      e.preventDefault(); // Stop default browser tab behavior
-      console.log("✅ Tab key detected and prevented default behavior.");
+      e.preventDefault();
+      console.log("✅ Tab key detected.");
 
       if (currentSuggestion && currentSuggestion.startsWith(input.value)) {
         console.log("✅ Tab pressed - Applying Suggestion:", currentSuggestion);
@@ -170,13 +164,18 @@ const addListeners = (input) => {
           ghost.remove();
         }
 
-        // 🔄 **Fix: Fetch a new suggestion immediately after Tab**
+        // 🔄 **Fix: Immediately fetch a new suggestion after Tab**
         console.log("🔄 Fetching new suggestion after Tab...");
-        debouncedFetch(); // 🔥 **Now properly using debouncedFetch()**
+        setTimeout(() => debouncedFetch(), 200);
       } else {
         console.warn("⚠️ No valid suggestion available when Tab was pressed.");
       }
     }
+  });
+
+  // ✅ Ensure a new suggestion appears when focusing on the input field
+  input.addEventListener("focus", () => {
+    debouncedFetch();
   });
 };
 
