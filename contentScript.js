@@ -1,10 +1,23 @@
-let isAutocompleteEnabled = false;
-let observer;
+console.log("🚀 Content script is running!");
+
+chrome.runtime.sendMessage({ action: "testMessage" }, (response) => {
+  if (chrome.runtime.lastError) {
+    console.error("❌ Message failed:", chrome.runtime.lastError);
+  } else {
+    console.log("📩 Response from background:", response);
+  }
+});
+
 
 // Function to request page metadata
 const fetchPageMetadata = async () => {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({ action: "getTabMetadata" }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error("❌ Failed to fetch metadata:", chrome.runtime.lastError);
+        reject(new Error("Extension context invalidated."));
+        return;
+      }
       resolve(response);
     });
   });
@@ -13,14 +26,35 @@ const fetchPageMetadata = async () => {
 // Function to request autocompletion from the background script
 const fetchSuggestion = async (text) => {
   return new Promise(async (resolve) => {
-    const metadata = await fetchPageMetadata();
-    chrome.runtime.sendMessage({ action: "fetchSuggestion", text, metadata }, (response) => {
-      resolve(response.suggestion);
-    });
+    try {
+      const metadata = await fetchPageMetadata();
+      console.log("🔎 Metadata fetched:", metadata);
+
+      chrome.runtime.sendMessage({ action: "fetchSuggestion", text, metadata }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.error("❌ Message failed:", chrome.runtime.lastError);
+          resolve(""); // Ensure we return an empty string instead of undefined
+          return;
+        }
+        console.log("📩 Suggestion response received:", response);
+
+        if (!response || !response.suggestion) {
+          console.warn("⚠️ No suggestion found in response:", response);
+          resolve(""); // Prevent undefined values
+          return;
+        }
+
+        resolve(response.suggestion);
+      });
+    } catch (error) {
+      console.error("❌ Error in fetchSuggestion:", error);
+      resolve(""); // Prevent undefined values
+    }
   });
 };
 
-// Debounce function to reduce API calls (2-second delay)
+
+// Debounce function to reduce API calls (500ms delay for testing)
 const debounce = (func, delay) => {
   let timer;
   return (...args) => {
@@ -30,118 +64,137 @@ const debounce = (func, delay) => {
 };
 
 // Function to create or update ghost text overlay
-const createGhostTextOverlay = (input, suggestion, cursorPosition) => {
+const createGhostTextOverlay = (input, suggestion) => {
   let ghost = input.parentElement.querySelector('.ghost-text');
+
   if (!ghost) {
+    console.log("🆕 Creating new ghost text overlay.");
     ghost = document.createElement('div');
     ghost.className = 'ghost-text';
+
+    // Ensure parent is correctly positioned
+    const parentStyle = window.getComputedStyle(input.parentElement);
+    if (parentStyle.position === 'static') {
+      input.parentElement.style.position = 'relative'; // Prevents misalignment
+    }
+
+    // Ghost text should match input field styling
     ghost.style.position = 'absolute';
     ghost.style.pointerEvents = 'none';
-    ghost.style.color = '#ccc';
+    ghost.style.color = 'rgba(150, 150, 150, 0.7)'; // Light gray suggestion text
+    ghost.style.whiteSpace = 'pre-wrap';
+    ghost.style.overflow = 'hidden';
     ghost.style.fontFamily = window.getComputedStyle(input).fontFamily;
     ghost.style.fontSize = window.getComputedStyle(input).fontSize;
-    ghost.style.left = input.offsetLeft + 'px';
-    ghost.style.top = input.offsetTop + 'px';
+    ghost.style.lineHeight = window.getComputedStyle(input).lineHeight;
     ghost.style.padding = window.getComputedStyle(input).padding;
-    input.parentElement.style.position = 'relative';
+    ghost.style.margin = window.getComputedStyle(input).margin;
+    ghost.style.background = 'transparent';
+    ghost.style.zIndex = '1';
+
+    // **Fix alignment issues**
+    ghost.style.left = `${input.offsetLeft}px`;
+    ghost.style.top = `${input.offsetTop}px`;
+    ghost.style.width = `${input.offsetWidth}px`;
+    ghost.style.height = `${input.offsetHeight}px`;
+
     input.parentElement.appendChild(ghost);
   }
 
-  // Show only the part of the suggestion after the cursor position
-  ghost.textContent = input.value.substring(0, cursorPosition) + suggestion.slice(cursorPosition);
+  // **Only display suggested text, not what is already typed**
+  const cursorPosition = input.selectionStart || 0;
+  const ghostText = suggestion.slice(cursorPosition); // AI suggestion after cursor
+
+  console.log("🔍 Cursor Position:", cursorPosition);
+  console.log("👻 Ghost Text Suggestion:", ghostText);
+
+  // **Ensure ghost text only shows the AI-generated suggestion**
+  ghost.textContent = ghostText ? ghostText : "";
 };
+
+
 
 // Attach event listeners to inputs
 const addListeners = (input) => {
-  if (!isAutocompleteEnabled) return;
-
   let currentSuggestion = '';
-  let cursorPosition = 0;
-  let lastInputValue = ''; // Store last input value
 
   const debouncedFetch = debounce(async () => {
-    if (!isAutocompleteEnabled) return;
     const text = input.value.trim();
-
-    if (text !== '' && text !== lastInputValue) {
-      lastInputValue = text;
+    if (text !== '') {
       currentSuggestion = await fetchSuggestion(text);
+      console.log("💡 Current Suggestion:", currentSuggestion);
       if (currentSuggestion) {
-        createGhostTextOverlay(input, currentSuggestion, cursorPosition);
+        createGhostTextOverlay(input, currentSuggestion);
       }
     }
-  }, 2000);
+  }, 1500);
 
-  input.addEventListener('input', (e) => {
-    cursorPosition = e.target.selectionStart;
-    debouncedFetch();
+  input.addEventListener('input', () => {
+    debouncedFetch(); // Trigger autocomplete after every new input
   });
 
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Tab' && currentSuggestion.startsWith(input.value)) {
-      e.preventDefault();
-      input.value = currentSuggestion;
-      let ghost = input.parentElement.querySelector('.ghost-text');
-      if (ghost) ghost.remove();
-    }
+    console.log("🖮 Key Pressed:", e.key); // Log key presses
 
-    // Remove ghost text if user keeps typing
-    if (e.key.length === 1) {
-      let ghost = input.parentElement.querySelector('.ghost-text');
-      if (ghost) ghost.remove();
-    }
-  });
-};
+    if (e.key === 'Tab') {
+      e.preventDefault(); // Stop default browser tab behavior
+      console.log("✅ Tab key intercepted and prevented default behavior.");
 
-// Initialize autocomplete
-const initAutocomplete = () => {
-  chrome.storage.sync.get('autocompleteEnabled', (data) => {
-    isAutocompleteEnabled = data.autocompleteEnabled || false;
-    if (isAutocompleteEnabled) {
-      document.querySelectorAll('input[type="text"], textarea').forEach(addListeners);
-      startObserver();
-    }
-  });
-};
+      if (currentSuggestion && currentSuggestion.startsWith(input.value)) {
+        console.log("✅ Tab pressed - Applying Suggestion:", currentSuggestion);
 
-// Start observing the DOM for dynamically added input fields
-const startObserver = () => {
-  if (observer) observer.disconnect();
-  observer = new MutationObserver((mutations) => {
-    if (!isAutocompleteEnabled) return;
-    mutations.forEach((mutation) => {
-      mutation.addedNodes.forEach((node) => {
-        if (node.matches?.('input[type="text"], textarea')) addListeners(node);
-      });
-    });
-  });
-  observer.observe(document.body, { childList: true, subtree: true });
-};
+        input.value = currentSuggestion; // Apply the suggestion
 
-// Listen for toggle changes in real-time
-chrome.storage.onChanged.addListener((changes) => {
-  if ('autocompleteEnabled' in changes) {
-    isAutocompleteEnabled = changes.autocompleteEnabled.newValue;
-
-    if (!isAutocompleteEnabled) {
-      console.log("🚫 Autocompletion Disabled");
-      if (observer) observer.disconnect(); // Stop observing DOM changes
-      document.querySelectorAll('input[type="text"], textarea').forEach((input) => {
-        input.removeEventListener('input', addListeners);
-        input.removeEventListener('keydown', addListeners);
+        // Remove ghost text after accepting the suggestion
         let ghost = input.parentElement.querySelector('.ghost-text');
         if (ghost) ghost.remove();
-      });
-    } else {
-      console.log("✅ Autocompletion Enabled");
-      initAutocomplete();
+
+        // 🔥 Fetch a new suggestion after applying the previous one
+        setTimeout(() => debouncedFetch(), 300);
+      }
+    }
+  });
+};
+
+
+
+
+document.addEventListener("focusin", (event) => {
+  const input = event.target;
+  if (input.matches('input[type="text"], textarea')) {
+    if (!input.dataset.autocompleteEnabled) { // Prevent duplicate listeners
+      input.dataset.autocompleteEnabled = "true"; 
+      addListeners(input);
     }
   }
 });
 
-// Ensure script runs after the page fully loads
-if (document.readyState === "complete") {
-  initAutocomplete();
-} else {
-  window.addEventListener("load", initAutocomplete);
-}
+
+// Observe the DOM for dynamically added input fields
+const observer = new MutationObserver((mutations) => {
+  mutations.forEach((mutation) => {
+    mutation.addedNodes.forEach((node) => {
+      if (node.matches?.('input[type="text"], textarea')) {
+        console.log("🆕 New input field detected:", node);
+
+        // Force re-enable autocomplete for new inputs
+        node.dataset.autocompleteEnabled = "false";
+
+        node.addEventListener("focus", () => {
+          if (!node.dataset.autocompleteEnabled) {
+            node.dataset.autocompleteEnabled = "true";
+            addListeners(node);
+          }
+        }, { once: true });
+      }
+    });
+  });
+});
+
+// Restart observer every time a suggestion is applied
+const restartObserver = () => {
+  observer.disconnect();
+  observer.observe(document.body, { childList: true, subtree: true });
+};
+
+restartObserver();
