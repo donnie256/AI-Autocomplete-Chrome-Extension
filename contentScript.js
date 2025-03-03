@@ -118,27 +118,45 @@ const createGhostTextOverlay = (input, suggestion) => {
 const addListeners = (input) => {
   let currentSuggestion = '';
 
+  // ✅ Define Debounced Fetch Function
   const debouncedFetch = debounce(async () => {
     const text = input.value.trim();
     if (text !== '') {
       currentSuggestion = await fetchSuggestion(text);
       console.log("💡 Current Suggestion:", currentSuggestion);
+
       if (currentSuggestion) {
         createGhostTextOverlay(input, currentSuggestion);
       }
     }
   }, 1500);
 
+  // ✅ Handle Input Changes (Use Debounced Fetch)
   input.addEventListener('input', () => {
-    debouncedFetch(); // Trigger autocomplete after every new input
+    debouncedFetch(); // 🔥 **Now properly using debouncedFetch()**
+    
+    // Remove ghost text if user continues typing
+    let ghost = input.parentElement.querySelector('.ghost-text');
+    if (ghost) ghost.remove();
   });
 
-  input.addEventListener('keydown', (e) => {
-    console.log("🖮 Key Pressed:", e.key); // Log key presses
+  // ✅ Handle Keydown Events
+  input.addEventListener('keydown', async (e) => {
+    console.log("🖮 Key Pressed:", e.key);
 
+    // 🛑 **Fix: Remove ghost text if user presses any normal key (except Tab)**
+    if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Enter') {
+      let ghost = input.parentElement.querySelector('.ghost-text');
+      if (ghost) {
+        console.log("❌ Removing ghost text due to key press.");
+        ghost.remove();
+      }
+    }
+
+    // ✅ Handle Tab Key for Autocomplete
     if (e.key === 'Tab') {
       e.preventDefault(); // Stop default browser tab behavior
-      console.log("✅ Tab key intercepted and prevented default behavior.");
+      console.log("✅ Tab key detected and prevented default behavior.");
 
       if (currentSuggestion && currentSuggestion.startsWith(input.value)) {
         console.log("✅ Tab pressed - Applying Suggestion:", currentSuggestion);
@@ -147,15 +165,20 @@ const addListeners = (input) => {
 
         // Remove ghost text after accepting the suggestion
         let ghost = input.parentElement.querySelector('.ghost-text');
-        if (ghost) ghost.remove();
+        if (ghost) {
+          console.log("❌ Removing ghost text after Tab key.");
+          ghost.remove();
+        }
 
-        // 🔥 Fetch a new suggestion after applying the previous one
-        setTimeout(() => debouncedFetch(), 300);
+        // 🔄 **Fix: Fetch a new suggestion immediately after Tab**
+        console.log("🔄 Fetching new suggestion after Tab...");
+        debouncedFetch(); // 🔥 **Now properly using debouncedFetch()**
+      } else {
+        console.warn("⚠️ No valid suggestion available when Tab was pressed.");
       }
     }
   });
 };
-
 
 
 
